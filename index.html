@@ -1,0 +1,215 @@
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+    <title>My Website Home Page</title>
+    <meta charset="UTF-8">
+    <style>
+        body, html {
+            background: transparent;
+            font-family: "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+        }
+
+        .msgBox {
+            background-color: rgb(16, 13, 18);
+            border-radius: 6px;
+            padding: 10px 10px 20px 80px;
+            position: relative;
+            margin-bottom: 5px;
+            animation: slideIn 2s;
+        }
+
+        .slideOut {
+            animation: slideOut 2s;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        @keyframes slideIn {
+            from {transform: translateY(100px);opacity: 0;}
+            to {transform: translateY(0);opacity: 1;}
+        }
+
+        @keyframes slideOut {
+            from {transform: translateY(0);opacity: 1;}
+            to {transform: translateY(-100px);opacity: 0;}
+        }
+
+        .msgBox > img {
+            position: absolute;
+            border-radius: 50%;
+            height: 60px;
+            top: 10px;
+            left: 10px;
+        }
+
+        .msgBox .msgUser {
+            color: rgb(196, 102, 220);
+            font-weight: bold;
+        }
+
+        .msgBox .msgContent {
+            color: white;
+            font-size: 1.2em;
+            font-weight: 100;
+        }
+
+        .msgBox .msgContent img {
+            height: 1.2em;
+            vertical-align: text-bottom;
+        }
+
+        input {
+            width: 100%;
+            padding: 5px 10px;
+            border: none;
+            background-color: #ccc;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+<div id="messagesList">
+</div>
+<div id="login" class="hidden">
+    <h1>Hi!</h1>
+    <h2>Step 1: Twitch login</h2>
+    <p>
+        First of all, please log in!
+        <a href="https://id.twitch.tv/oauth2/authorize?client_id=i70ttyxevsl351a4jxpws6mjde6z90&redirect_uri=https://ari.tlanfer.de/&response_type=token&scope=chat:read">Login!</a>
+    </p>
+</div>
+<div id="builder" class="hidden">
+    <h1>Hi!</h1>
+    <h2>Step 2: Channel settings</h2>
+    <p>
+        What channel do you want to watch?
+    </p>
+    <input type="text" id="txtChannel">
+    <p>
+        What keyword do you want to watch for?
+    </p>
+    <input type="text" id="txtKeyword">
+
+    <p>
+        Use the following url in your OBS:
+    </p>
+    <input type="text" readonly id="outUrl">
+</div>
+<template id="messageTemplate">
+    <div class="msgBox">
+        <img src="https://static-cdn.jtvnw.net/jtv_user_pictures/194f1637-55f8-4c1e-a824-70cabcf0ecc7-profile_image-70x70.png">
+        <div class="msgUser">tlanfer</div>
+        <div class="msgContent">You're the best</div>
+    </div>
+</template>
+
+</body>
+<script src="tmi.min.js"></script>
+<script src="messagebuffer.js"></script>
+<script src="user.js"></script>
+<script src="emotes.js"></script>
+<script type="text/javascript">
+
+
+    function parseParms(str) {
+        var pieces = str.split("&"), data = {}, i, parts;
+        // process each query pair
+        for (i = 0; i < pieces.length; i++) {
+            parts = pieces[i].split("=");
+            if (parts.length < 2) {
+                parts.push("");
+            }
+            data[decodeURIComponent(parts[0])] = decodeURIComponent(parts[1]);
+        }
+        return data;
+    }
+
+    var params = parseParms(location.hash.substr(1));
+    let accessToken = params["access_token"];
+    let channel = params["channel"];
+    let keyword = params["keyword"];
+    console.log("channel: ", channel);
+    console.log("keyword: ", keyword);
+
+    if(accessToken === undefined) {
+        document.getElementById("login").classList.remove("hidden");
+    } else if(channel !== undefined && keyword !== undefined) {
+        console.log(`Watching channel ${channel} for keyword '${keyword}' `);
+        const client = new tmi.Client({
+            channels: [ channel ],
+            skipMembership: true,
+        });
+
+        var messagesList = document.getElementById("messagesList");
+        var createMessageBox = function (id, username, userId, iconUrl, message, emotes, roomId) {
+            let template = document.getElementById("messageTemplate");
+            var clone = template.content.cloneNode(true);
+
+            var duration = message.length*50;
+
+            message = replaceEmotes(message, emotes, roomId);
+
+            let messageId = "msg-" + id;
+            clone.querySelector(".msgBox").id = messageId;
+            clone.querySelector(".msgUser").innerText = username;
+            clone.querySelector(".msgContent").innerHTML = message;
+            clone.querySelector("img").src = iconUrl;
+
+            profileImage(userId, accessToken, function (url) {
+                document.getElementById(messageId)
+                    .querySelector("img").src = url;
+            });
+
+            setTimeout(()=>{
+                let rowToRemove = document.getElementById(messageId);
+                rowToRemove.classList.add("slideOut");
+                rowToRemove.addEventListener("animationend", ()=>{
+                    messagesList.removeChild(rowToRemove);
+                });
+            }, Math.max(duration, 5000));
+
+            messagesList.appendChild(clone);
+        }
+
+        var messages = createMessagebuffer(100);
+
+        client.connect();
+        client.on('message', (channel, tags, message, self) => {
+            loadBttvEmotes(tags["room-id"]);
+            messages.push(tags.id, {id: tags.id, message, tags});
+            if (tags["reply-parent-msg-id"] && message.endsWith(keyword) && (tags.mod === true || tags["badges"]["broadcaster"] === "1")) {
+                let originalMessage = messages.findMessageById(tags["reply-parent-msg-id"]);
+                if(originalMessage){
+                    createMessageBox(originalMessage.id,
+                        originalMessage.tags["username"],
+                        originalMessage.tags["user-id"],
+                        "https://static-cdn.jtvnw.net/jtv_user_pictures/194f1637-55f8-4c1e-a824-70cabcf0ecc7-profile_image-70x70.png",
+                        originalMessage.message,
+                        originalMessage.tags.emotes,
+                        originalMessage.tags["room-id"],
+                    );
+                }
+            }
+        });
+    } else {
+        document.getElementById("builder").classList.remove("hidden");
+        let txtChannel = document.getElementById("txtChannel");
+        let txtKeyword = document.getElementById("txtKeyword");
+        var updUrl = function () {
+            if(txtChannel.value === ""){
+                document.getElementById("outUrl").value = "⚠ Please enter a channel";
+            } else if(txtKeyword.value === ""){
+                document.getElementById("outUrl").value = "⚠ Please enter a keyword";
+            } else {
+                var url = location.href.substring(0, location.href.indexOf("#"));
+                var totalUrl = url + "#access_token="+accessToken + "&channel="+txtChannel.value+"&keyword="+txtKeyword.value;
+                document.getElementById("outUrl").value = totalUrl;
+            }
+
+        }
+        txtChannel.addEventListener("input", updUrl);
+        txtKeyword.addEventListener("input", updUrl);
+    }
+</script>
+</html>
